@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY . /app
 
-EXPOSE 8000
+EXPOSE 8501
 
-# Use the PORT env var if provided by the platform, fallback to 8000 locally
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start Streamlit using the PORT env var provided by the platform (fallback to 8501 locally)
+CMD ["sh", "-c", "streamlit run app.py --server.port ${PORT:-8501} --server.address 0.0.0.0"]
