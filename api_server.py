@@ -1,6 +1,10 @@
 import os
 import urllib.request
 import zipfile
+import hashlib
+from typing import Optional
+from fastapi import Depends, Header
+from fastapi.responses import FileResponse, StreamingResponse
 
 # --- CLOUD DATABASE BOOTSTRAP ---
 DB_DIR = "database"
@@ -45,6 +49,90 @@ def root():
     return {"status": "online", "service": "RezpharmaCDSS M1 & Advisor Microservice", "db_drugs": 4566, "db_ddis": 2855310}
 
 @app.post("/api/v1/m1/analyze")
+# ═══════════════════════════════════════════════════════════
+#  SYNC / REPLICATION EXPORT  (token-protected)
+#  Lets your own host pull a verified copy of the master DB:
+#    GET /api/v1/export/checksum  -> {"sha256":..., "size":...}
+#    GET /api/v1/export/snapshot  -> raw rezpharma.db bytes
+#                                    (supports Range = resumable)
+# ═══════════════════════════════════════════════════════════
+SYNC_TOKEN = os.getenv("SYNC_TOKEN", "")
+_sha_cache = {"sha": None, "size": None}
+
+
+def _sync_auth(x_sync_token: str = Header(default="")):
+    if not SYNC_TOKEN or x_sync_token != SYNC_TOKEN:
+        raise HTTPException(status_code=403, detail="bad sync token")
+
+
+def _db_meta():
+    if _sha_cache["sha"] is None and os.path.exists(DB_PATH):
+        h = hashlib.sha256()
+        with open(DB_PATH, "rb") as f:
+            for block in iter(lambda: f.read(8 * 1024 * 1024), b""):
+                h.update(block)
+        _sha_cache["sha"] = h.hexdigest()
+        _sha_cache["size"] = os.path.getsize(DB_PATH)
+    return _sha_cache
+
+
+@app.get("/api/v1/export/checksum")
+def export_checksum(_=Depends(_sync_auth)):
+    m = _db_meta()
+    if not m["sha"]:
+        raise HTTPException(status_code=404, detail="database not ready")
+    return {"sha256": m["sha"], "size": m["size"]}
+
+
+@app.get("/api/v1/export/snapshot")
+def export_snapshot(
+    _=Depends(_sync_auth),
+    range_header: Optional[str] = Header(default=None, alias="Range"),
+):
+    m = _db_meta()
+    if not m["sha"]:
+        raise HTTPException(status_code=404, detail="database not ready")
+    total = m["size"]
+
+    if range_header:
+        try:
+            rng = range_header.split("=")[1]
+            start_s, end_s = rng.split("-")
+            start = int(start_s)
+            end = min(int(end_s) if end_s else total - 1, total - 1)
+            length = end - start + 1
+
+            def iter_file():
+                with open(DB_PATH, "rb") as f:
+                    f.seek(start)
+                    left = length
+                    while left > 0:
+                        chunk = f.read(min(1024 * 1024, left))
+                        if not chunk:
+                            break
+                        left -= len(chunk)
+                        yield chunk
+
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                media_type="application/octet-stream",
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{total}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(length),
+                },
+            )
+        except Exception:
+            raise HTTPException(status_code=416, detail="bad range")
+
+    return FileResponse(
+        DB_PATH,
+        media_type="application/octet-stream",
+        filename="rezpharma.db",
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(total)},
+    )
+# ═══════════════════ END SYNC EXPORT ═══════════════════
 def analyze_regimen(payload: PatientRegimen):
     """Microservice Endpoint: M1 DDI Check + Blackboard Update"""
     # Reset blackboard for new patient analysis
