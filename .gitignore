@@ -1,29 +1,23 @@
-rezpharma_env/
+# Python
 __pycache__/
 *.py[cod]
-.ipynb_checkpoints/
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-*.db
-.env
-htmlcov/
-.coverage
-database/*.db 
-__pycache__/ 
-.env 
-database/*.db 
-database/*.zip 
-rezpharma_env/ 
-venv/ 
-__pycache__/ 
-.env 
-.env 
-.env 
-*.env 
-.env 
-*.env 
 
-.qwen/
+# Secrets — NEVER commit
+*token*.txt
+.env
+*.env
 gha-creds-*.json
+
+# Registry / build artifacts
+blobs/
+manifests/
+
+# Database payloads (served via Releases + volume, not Git)
+*.db
+*.sqlite
+database/*.db
+database/*.zip
+
+# IDE / tools
+.vscode/
+.qwen/
